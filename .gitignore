@@ -19,6 +19,9 @@ static/tiles/
 .vscode/
 .idea/
 
+# ngrok
+ngrok.exe
+
 # OS
 .DS_Store
 Thumbs.db

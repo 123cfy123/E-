@@ -1,0 +1,24 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.conda/
+
+# OSM download cache
+cache/
+
+# Offline tiles (too many files, download via script)
+static/tiles/
+
+# QGIS temp
+*.qmd
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

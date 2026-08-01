@@ -1,0 +1,22 @@
+# ECNU Walk - 华东师大闵行校区智能导航
+# 核心依赖
+
+# 地理空间数据处理
+osmnx>=2.0.0
+geopandas>=1.0.0
+shapely>=2.0.0
+
+# Web 框架
+flask>=3.0.0
+flask-cors>=4.0.0
+requests>=2.32.0
+
+# 数据可视化
+folium>=0.18.0
+
+# 数据库（后续阶段）
+psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
+
+# 工具
+python-dotenv>=1.0.0

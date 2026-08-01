@@ -1,0 +1,15 @@
+name: ecnu-walk
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - flask>=3.0
+  - requests
+  - networkx
+  - geopandas
+  - osmnx>=2.0
+  - shapely
+  - pip
+  - pip:
+    - maplibre-gl  # (仅前端 CDN 引用，这里留作备选)

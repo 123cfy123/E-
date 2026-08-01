@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>E刻校园 - 华师大闵行校区智能导航</title>
+<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" />
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif; }
+#map { width: 100vw; height: 100vh; }
+
+/* 搜索栏 */
+#search-panel { position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; width: 420px; max-width: 90vw; }
+#search-box { display: flex; background: #fff; border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15); overflow: hidden; }
+#search-input { flex: 1; border: none; padding: 14px 16px; font-size: 15px; outline: none; }
+#search-btn { border: none; background: #2563eb; color: #fff; padding: 0 20px;
+  font-size: 15px; cursor: pointer; white-space: nowrap; }
+#search-btn:hover { background: #1d4ed8; }
+#results-list { display: none; list-style: none; background: #fff; margin-top: 6px;
+  border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); overflow: hidden; }
+#results-list li { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #f0f0f0;
+  display: flex; justify-content: space-between; align-items: center; }
+#results-list li:hover { background: #eff6ff; }
+#results-list li:last-child { border-bottom: none; }
+.place-name { font-weight: 600; color: #1e293b; }
+.place-detail { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+.place-go { color: #2563eb; font-size: 12px; font-weight: 600; }
+
+/* 按钮 */
+.side-btn { position: fixed; right: 12px; z-index: 1000;
+  width: 40px; height: 40px; background: #fff; border: none;
+  border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  font-size: 18px; cursor: pointer; line-height: 40px; text-align: center; }
+.side-btn.active { background: #fef08a; box-shadow: 0 0 0 3px #eab308; }
+#locate-btn { top: 100px; }
+#pick-btn { top: 152px; }
+#edit-btn { top: 204px; }
+#add-btn { top: 256px; }
+#reset-btn { top: 308px; }
+
+/* 路线信息 */
+#route-info { display: none; position: fixed; bottom: 24px; left: 12px; z-index: 1000;
+  background: #fff; border-radius: 12px; padding: 16px 20px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15); min-width: 200px; }
+#route-info .dist { font-size: 24px; font-weight: 700; color: #2563eb; }
+#route-info .time { font-size: 14px; color: #64748b; margin-top: 4px; }
+#route-info .close { position: absolute; top: 8px; right: 12px;
+  background: none; border: none; font-size: 18px; cursor: pointer; color: #94a3b8; }
+
+/* 编辑弹窗 */
+#edit-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 3000; background: rgba(0,0,0,0.4);
+  justify-content: center; align-items: center; }
+#edit-modal.show { display: flex; }
+#edit-modal .card { background: #fff; border-radius: 16px; padding: 24px;
+  width: 380px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+#edit-modal h3 { margin-bottom: 16px; }
+#edit-modal label { font-size: 13px; color: #64748b; display: block; margin: 8px 0 4px; }
+#edit-modal input, #edit-modal textarea { width: 100%; padding: 8px 12px;
+  border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; }
+#edit-modal input:focus, #edit-modal textarea:focus { border-color: #2563eb; }
+#edit-modal textarea { resize: vertical; min-height: 50px; }
+#edit-modal .btns { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+#edit-modal .btns button { padding: 8px 20px; border-radius: 8px; border: none;
+  font-size: 14px; cursor: pointer; }
+#edit-modal .btn-save { background: #2563eb; color: #fff; }
+#edit-modal .btn-del { background: #ef4444; color: #fff; margin-right: auto; }
+#edit-modal .btn-cancel { background: #f1f5f9; color: #64748b; }
+
+#loading-bar { display: none; position: fixed; top: 0; left: 0; right: 0; height: 3px;
+  z-index: 4000; background: linear-gradient(90deg, #2563eb, #7c3aed, #2563eb);
+  background-size: 200% 100%; animation: ld 1.5s infinite; }
+@keyframes ld { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.maplibregl-ctrl-bottom-right { bottom: 80px; }
+</style>
+</head>
+<body>
+
+<div id="loading-bar"></div>
+<div id="map"></div>
+
+<div id="search-panel">
+  <div id="search-box">
+    <input id="search-input" placeholder="搜一搜: 打印成绩单 / 打篮球 / 补办校园卡..." autocomplete="off" />
+    <button id="search-btn" onclick="doSearch()">搜索</button>
+  </div>
+  <ul id="results-list"></ul>
+</div>
+
+<button class="side-btn" id="locate-btn" onclick="locateMe()" title="定位">📍</button>
+<button class="side-btn" id="pick-btn" onclick="manualPick()" title="手动选起点">🎯</button>
+<button class="side-btn" id="edit-btn" onclick="toggleEdit()" title="编辑地点">✏️</button>
+<button class="side-btn" id="add-btn" onclick="startAddPlace()" title="新增地点">➕</button>
+<button class="side-btn" id="reset-btn" onclick="resetNorth()" title="回正北">🧭</button>
+
+<div id="route-info">
+  <button class="close" onclick="clearRoute()">✕</button>
+  <div class="dist" id="route-dist"></div>
+  <div class="time" id="route-time"></div>
+  <div id="waypoints-list" style="margin-top:8px;font-size:13px;color:#475569;"></div>
+</div>
+
+<div id="edit-modal">
+  <div class="card">
+    <h3 id="modal-title">编辑地点</h3>
+    <label>名称</label><input id="edit-name" />
+    <label>关键词 (用逗号分隔)</label><input id="edit-keywords" placeholder="图书馆, 借书, 自习" />
+    <label>详情</label><textarea id="edit-detail" placeholder="开放时间、楼层等"></textarea>
+    <div class="btns">
+      <button class="btn-del" id="btn-delete" style="display:none" onclick="deletePlace()">删除</button>
+      <button class="btn-cancel" onclick="closeModal()">取消</button>
+      <button class="btn-save" onclick="savePlace()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// === 状态 ===
+let userLat = null, userLng = null;
+let editMode = false, addMode = false, editingId = null;
+let routeSourceId = null, routeLayerId = null;
+let destMarker = null;
+
+// === 地图 (MapLibre GL JS, WGS-84) ===
+const CAMPUS_BOUNDS = [[121.440, 31.024], [121.460, 31.042]];
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: {
+    version: 8,
+    sources: {
+      osm: {
+        type: "raster",
+        tiles: ["/tiles/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        attribution: "&copy; OpenStreetMap"
+      }
+    },
+    layers: [{ id: "osm-tiles", type: "raster", source: "osm" }]
+  },
+  minZoom: 14,
+  maxZoom: 19,
+  maxBounds: CAMPUS_BOUNDS,
+  dragRotate: true,           // 右键拖拽旋转
+  touchZoomRotate: true,      // 触屏旋转
+  pitchWithRotate: false,
+  attributionControl: false
+});
+
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+
+// === 遮罩 & 边界 ===
+const OUTER = [[[-180, 90], [180, 90], [180, -90], [-180, -90]]];
+
+// 校园边界坐标（内联，无加载延迟）
+const BOUNDARY_COORDS = [[121.44155012757561, 31.036935492247935], [121.44652502794929, 31.025567695689997], [121.45295843325174, 31.027451008769802], [121.45052093186386, 31.033665677739222], [121.45776371070215, 31.03483849543867], [121.45727636309672, 31.037935863398225], [121.45284110000001, 31.037403], [121.45143389999997, 31.0399357], [121.44155012757561, 31.036935492247935]];
+
+map.on("load", () => {
+  // 1. 路网（底层）
+  map.addSource("roadnet", {
+    type: "geojson",
+    data: "/data/ecnu_edges_merged.geojson"
+  });
+  map.addLayer({
+    id: "roadnet-line", type: "line", source: "roadnet",
+    paint: {
+      "line-color": "#f87171",
+      "line-width": 2,
+      "line-opacity": 0.6
+    }
+  });
+
+  // 2. 黑色遮罩（顶层，遮盖校外所有内容）
+  map.addSource("mask", {
+    type: "geojson",
+    data: { type: "Polygon", coordinates: [OUTER[0], BOUNDARY_COORDS] }
+  });
+  map.addLayer({
+    id: "mask-fill", type: "fill", source: "mask",
+    paint: { "fill-color": "#000", "fill-opacity": 1 }
+  });
+
+  // 3. 边界线
+  map.addSource("boundary", {
+    type: "geojson",
+    data: { type: "Polygon", coordinates: [BOUNDARY_COORDS] }
+  });
+  map.addLayer({
+    id: "boundary-line", type: "line", source: "boundary",
+    paint: { "line-color": "#2563eb", "line-width": 2, "line-dasharray": [4, 2] }
+  });
+
+  // 自适应屏幕
+  const bounds = BOUNDARY_COORDS.reduce(
+    (b, c) => b.extend(c),
+    new maplibregl.LngLatBounds(BOUNDARY_COORDS[0], BOUNDARY_COORDS[0])
+  );
+  map.fitBounds(bounds, { padding: 30, maxZoom: 17, duration: 0 });
+});
+
+// === 工具 ===
+function Ld() { document.getElementById("loading-bar").style.display = "block"; }
+function Hd() { document.getElementById("loading-bar").style.display = "none"; }
+
+// === 回正北 ===
+function resetNorth() {
+  map.easeTo({ bearing: 0, pitch: 0 });
+}
+
+// === 定位 ===
+function locateMe() {
+  const btn = document.getElementById("locate-btn");
+  btn.textContent = "⏳";
+  navigator.geolocation.getCurrentPosition(pos => {
+    userLat = pos.coords.latitude;
+    userLng = pos.coords.longitude;
+
+    // 更新或创建标记
+    if (map.getSource("user-loc")) {
+      map.getSource("user-loc").setData({
+        type: "Point", coordinates: [userLng, userLat]
+      });
+    } else {
+      map.addSource("user-loc", {
+        type: "geojson",
+        data: { type: "Point", coordinates: [userLng, userLat] }
+      });
+      map.addLayer({
+        id: "user-dot", type: "circle", source: "user-loc",
+        paint: { "circle-radius": 8, "circle-color": "#2563eb",
+          "circle-stroke-width": 3, "circle-stroke-color": "#fff" }
+      });
+    }
+
+    map.flyTo({ center: [userLng, userLat], zoom: 17 });
+    btn.textContent = "📍";
+  }, err => {
+    alert("定位失败: " + err.message + "\n请用🎯手动选点");
+    btn.textContent = "📍";
+  }, { enableHighAccuracy: true, timeout: 10000 });
+}
+
+// === 通用取消 ===
+let _pickMode = false;
+let _addModeClick = null; // 存储 MapLibre click handler 引用
+
+function cancelPickMode() {
+  _pickMode = false;
+  document.getElementById("pick-btn").style.background = "#fff";
+  map.getCanvas().style.cursor = "";
+}
+
+function cancelAddMode() {
+  if (_addModeClick) { map.off("click", _addModeClick); _addModeClick = null; }
+  addMode = false;
+  document.getElementById("add-btn").classList.remove("active");
+  document.getElementById("add-btn").textContent = "➕";
+  map.getCanvas().style.cursor = "";
+}
+
+// Esc 统一处理
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    if (document.getElementById("edit-modal").classList.contains("show")) {
+      closeModal();
+    } else if (_pickMode) {
+      cancelPickMode();
+    } else if (_addModeClick) {
+      cancelAddMode();
+    } else if (map.getSource("route")) {
+      clearRoute();
+    }
+  }
+});
+
+// 右键取消
+map.on("contextmenu", e => {
+  if (_pickMode) { cancelPickMode(); }
+  if (_addModeClick) { cancelAddMode(); }
+});
+
+// === 手动选点 ===
+function manualPick() {
+  if (editMode) return;
+
+  // 再次点击取消
+  if (_pickMode) { cancelPickMode(); return; }
+  if (_addModeClick) { cancelAddMode(); }
+
+  _pickMode = true;
+  const btn = document.getElementById("pick-btn");
+  btn.style.background = "#fef08a";
+  map.getCanvas().style.cursor = "crosshair";
+
+  map.once("click", function(e) {
+    userLat = e.lngLat.lat;
+    userLng = e.lngLat.lng;
+
+    if (map.getSource("user-loc")) {
+      map.getSource("user-loc").setData({ type: "Point", coordinates: [userLng, userLat] });
+    } else {
+      map.addSource("user-loc", { type: "geojson", data: { type: "Point", coordinates: [userLng, userLat] } });
+      map.addLayer({ id: "user-dot", type: "circle", source: "user-loc",
+        paint: { "circle-radius": 8, "circle-color": "#2563eb", "circle-stroke-width": 3, "circle-stroke-color": "#fff" } });
+    }
+    cancelPickMode();
+  });
+}
+
+// === 搜索 ===
+function doSearch() {
+  const q = document.getElementById("search-input").value.trim();
+  if (!q) return;
+  const list = document.getElementById("results-list");
+  Ld();
+  fetch("/api/search?q=" + encodeURIComponent(q))
+    .then(r => r.json()).then(data => {
+      Hd(); list.innerHTML = "";
+      if (!data.results.length) {
+        list.innerHTML = '<li style="color:#94a3b8;justify-content:center;">没找到</li>';
+        list.style.display = "block"; return;
+      }
+      data.results.forEach(p => {
+        const li = document.createElement("li");
+        li.innerHTML = `<div><div class="place-name">${p.name}</div><div class="place-detail">${p.detail}</div></div><span class="place-go">去这里 →</span>`;
+        li.onclick = () => goTo(p);
+        list.appendChild(li);
+      });
+      list.style.display = "block";
+    }).catch(e => { Hd(); alert("请求失败，请检查网络连接"); });
+}
+
+document.getElementById("search-input").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+document.addEventListener("click", e => { if (!e.target.closest("#search-panel")) document.getElementById("results-list").style.display = "none"; });
+
+// === 导航 ===
+function goTo(place) {
+  document.getElementById("results-list").style.display = "none";
+  document.getElementById("search-input").value = place.name;
+  if (userLat == null) { alert("请先定位📍或手动选点🎯"); return; }
+
+  // 目的地标记
+  if (map.getSource("dest")) map.removeLayer("dest-label").removeSource("dest");
+  map.addSource("dest", {
+    type: "geojson",
+    data: { type: "Point", coordinates: [place.lng, place.lat] }
+  });
+  map.addLayer({
+    id: "dest-label", type: "circle", source: "dest",
+    paint: { "circle-radius": 10, "circle-color": "#e74c3c",
+      "circle-stroke-width": 3, "circle-stroke-color": "#fff" }
+  });
+
+  Ld();
+  fetch(`/api/route?from_lat=${userLat}&from_lng=${userLng}&to_lat=${place.lat}&to_lng=${place.lng}`)
+    .then(r => r.json()).then(data => {
+      Hd();
+      if (data.error) { alert("路径规划失败: " + data.error); return; }
+
+      // 路线
+      if (map.getSource("route")) { map.removeLayer("route-line"); map.removeSource("route"); }
+      map.addSource("route", {
+        type: "geojson",
+        data: { type: "Feature", geometry: data.route }
+      });
+      map.addLayer({
+        id: "route-line", type: "line", source: "route",
+        paint: { "line-color": "#2563eb", "line-width": 5, "line-opacity": 0.8 },
+        layout: { "line-cap": "round", "line-join": "round" }
+      });
+
+      // 缩放到路线
+      const coords = data.route.coordinates;
+      const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+      map.fitBounds(bounds, { padding: 80 });
+
+      document.getElementById("route-dist").textContent = data.distance_km + " 公里";
+      document.getElementById("route-time").textContent = "约 " + data.time_min + " 分钟 · " + data.distance_m + " 米";
+      document.getElementById("route-info").style.display = "block";
+    }).catch(e => { Hd(); alert("请求失败，请检查网络连接"); });
+}
+
+function clearRoute() {
+  ["route-line", "dest-label"].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+  ["route", "dest"].forEach(id => { if (map.getSource(id)) map.removeSource(id); });
+  document.getElementById("route-info").style.display = "none";
+  document.getElementById("search-input").value = "";
+}
+
+map.on("click", e => {
+  if (!map.getSource("route")) return;
+  const canvas = e.originalEvent.target;
+  if (canvas.closest(".maplibregl-popup") || canvas.closest("#search-panel") ||
+      canvas.closest("#route-info") || canvas.closest(".side-btn") ||
+      canvas.closest("#edit-modal")) return;
+  clearRoute();
+});
+
+
+// === 编辑模式 ===
+function toggleEdit() {
+  editMode = !editMode;
+  const btn = document.getElementById("edit-btn");
+  if (editMode) {
+    if (addMode) startAddPlace();
+    btn.classList.add("active"); btn.textContent = "💾";
+    loadPlaceMarkers();
+  } else {
+    btn.classList.remove("active"); btn.textContent = "✏️";
+    clearPlaceMarkers();
+  }
+}
+
+let _placeMarkerEls = [];
+
+function loadPlaceMarkers() {
+  fetch("/api/places").then(r => r.json()).then(data => {
+    data.places.forEach(p => {
+      const el = document.createElement("div");
+      el.innerHTML = `<div style="background:#f59e0b;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;white-space:nowrap;font-weight:600;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:grab">${p.name}</div>`;
+      el.style.cursor = "grab";
+      el.title = "拖拽移动 · 双击编辑";
+
+      const marker = new maplibregl.Marker({ element: el, draggable: true })
+        .setLngLat([p.lng, p.lat])
+        .addTo(map);
+
+      marker.on("dragend", () => {
+        const pos = marker.getLngLat();
+        fetch("/api/places/" + p.id + "/move", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat: pos.lat, lng: pos.lng })
+        });
+      });
+
+      el.addEventListener("dblclick", () => openEdit(p.id));
+
+      marker._placeId = p.id;
+      _placeMarkerEls.push(marker);
+    });
+    console.log("编辑模式: " + data.places.length + " 个地点");
+  });
+}
+
+function clearPlaceMarkers() {
+  _placeMarkerEls.forEach(m => m.remove());
+  _placeMarkerEls = [];
+}
+
+// === 新增地点 ===
+function startAddPlace() {
+  if (editMode) toggleEdit();
+
+  // 再次点击取消
+  if (_addModeClick) { cancelAddMode(); return; }
+  if (_pickMode) { cancelPickMode(); }
+
+  const btn = document.getElementById("add-btn");
+  addMode = true;
+  btn.classList.add("active"); btn.textContent = "🎯";
+  map.getCanvas().style.cursor = "crosshair";
+
+  _addModeClick = function(e) {
+    editingId = null;
+    document.getElementById("modal-title").textContent = "新增地点";
+    document.getElementById("edit-name").value = "";
+    document.getElementById("edit-keywords").value = "";
+    document.getElementById("edit-detail").value = "";
+    document.getElementById("btn-delete").style.display = "none";
+    document.getElementById("edit-modal").classList.add("show");
+    document.getElementById("edit-modal").dataset.lat = e.lngLat.lat;
+    document.getElementById("edit-modal").dataset.lng = e.lngLat.lng;
+    cancelAddMode();
+  };
+  map.on("click", _addModeClick);
+}
+
+// === 编辑弹窗 ===
+function openEdit(placeId) {
+  fetch("/api/places").then(r => r.json()).then(data => {
+    const p = data.places.find(x => x.id === placeId);
+    if (!p) return;
+    editingId = placeId;
+    document.getElementById("modal-title").textContent = "编辑: " + p.name;
+    document.getElementById("edit-name").value = p.name;
+    document.getElementById("edit-keywords").value = p.keywords.join(",");
+    document.getElementById("edit-detail").value = p.detail || "";
+    document.getElementById("btn-delete").style.display = "block";
+    document.getElementById("edit-modal").classList.add("show");
+  });
+}
+
+function closeModal() {
+  document.getElementById("edit-modal").classList.remove("show");
+  editingId = null;
+}
+
+function savePlace() {
+  const name = document.getElementById("edit-name").value.trim();
+  const kwStr = document.getElementById("edit-keywords").value.trim();
+  const detail = document.getElementById("edit-detail").value.trim();
+  if (!name) return alert("名称不能为空");
+  const keywords = kwStr ? kwStr.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [name];
+
+  if (editingId) {
+    fetch("/api/places/" + editingId, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, keywords, detail })
+    }).then(r => r.json()).then(d => {
+      if (d.ok) { closeModal(); if (editMode) { clearPlaceMarkers(); loadPlaceMarkers(); } }
+    });
+  } else {
+    const lat = parseFloat(document.getElementById("edit-modal").dataset.lat);
+    const lng = parseFloat(document.getElementById("edit-modal").dataset.lng);
+    if (isNaN(lat) || isNaN(lng)) { alert("请先在地图上点击选择位置"); return; }
+    fetch("/api/places", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, keywords, detail, lat, lng })
+    }).then(r => r.json()).then(d => {
+      if (d.ok) { closeModal(); if (editMode) { clearPlaceMarkers(); loadPlaceMarkers(); } }
+    });
+  }
+}
+
+function deletePlace() {
+  if (!editingId || !confirm("确定删除「" + document.getElementById("edit-name").value + "」?")) return;
+  fetch("/api/places/" + editingId, { method: "DELETE" })
+    .then(r => r.json()).then(d => {
+      if (d.ok) { closeModal(); if (editMode) { clearPlaceMarkers(); loadPlaceMarkers(); } }
+    });
+}
+
+document.getElementById("edit-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeModal();
+});
+
+console.log("E刻校园 MapLibre GL 已就绪 | 右键拖拽旋转 | 滚轮缩放 | 🧭回正北");
+</script>
+</body>
+</html>

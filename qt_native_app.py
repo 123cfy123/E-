@@ -277,34 +277,47 @@ class MapCanvas(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("E刻校园 - 华师大闵行校区智能导航")
-        self.resize(1200,800)
+        self.setWindowTitle("E刻校园")
+        w_sz=QApplication.primaryScreen().availableSize()
+        self.resize(int(w_sz.width()*0.85),int(w_sz.height()*0.85))
 
         cw=QWidget(); self.setCentralWidget(cw)
         layout=QVBoxLayout(cw); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0)
 
+        # 全局样式
+        self.setStyleSheet("""
+            QMainWindow { background: #0f172a; }
+            QLabel { color: #e2e8f0; }
+        """)
+
         # 搜索栏
-        sf=QFrame(); sf.setStyleSheet("background:white; border-bottom:1px solid #e2e8f0;")
-        sl=QHBoxLayout(sf); sl.setContentsMargins(100,8,100,8)
+        sf=QFrame(); sf.setFixedHeight(56)
+        sf.setStyleSheet("QFrame{background:#ffffff; border-bottom:1px solid #e2e8f0;}")
+        sl=QHBoxLayout(sf); sl.setContentsMargins(200,8,200,8); sl.setSpacing(8)
 
         self.si=QLineEdit()
         self.si.setPlaceholderText("搜一搜：打印成绩单 / 打篮球 / 补办校园卡...")
-        self.si.setStyleSheet("QLineEdit{padding:10px 16px;border:1px solid #e2e8f0;border-radius:8px;font-size:15px;background:#f8fafc;}QLineEdit:focus{border-color:#2563eb;background:white;}")
+        self.si.setStyleSheet("""
+            QLineEdit { padding:10px 16px; border:2px solid #e2e8f0; border-radius:10px;
+                        font-size:15px; background:#f8fafc; color:#1e293b; }
+            QLineEdit:focus { border-color:#2563eb; background:#fff; }
+        """)
         self.si.returnPressed.connect(self.do_search)
 
+        btn_style="QPushButton{border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:600;}"
         sb=QPushButton("搜索"); sb.clicked.connect(self.do_search)
-        sb.setStyleSheet("QPushButton{background:#2563eb;color:white;border:none;border-radius:8px;padding:10px 20px;font-size:15px;}QPushButton:hover{background:#1d4ed8;}")
+        sb.setStyleSheet(btn_style+"QPushButton{background:#2563eb;color:white;}QPushButton:hover{background:#1d4ed8;}")
 
         clr=QPushButton("清除"); clr.clicked.connect(self.clear_all)
-        clr.setStyleSheet("QPushButton{background:#f1f5f9;color:#64748b;border:none;border-radius:8px;padding:10px 16px;font-size:14px;}QPushButton:hover{background:#e2e8f0;}")
+        clr.setStyleSheet(btn_style+"QPushButton{background:#f1f5f9;color:#475569;}QPushButton:hover{background:#e2e8f0;}")
 
         self.edit_btn=QPushButton("编辑"); self.edit_btn.setCheckable(True); self.edit_btn.clicked.connect(self.toggle_edit)
-        self.edit_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#64748b;border:none;border-radius:8px;padding:10px 16px;font-size:14px;}QPushButton:checked{background:#fef08a;color:#854d0e;}QPushButton:hover{background:#e2e8f0;}")
+        self.edit_btn.setStyleSheet(btn_style+"QPushButton{background:#f1f5f9;color:#475569;}QPushButton:checked{background:#fef08a;color:#854d0e;}QPushButton:hover{background:#e2e8f0;}")
 
         self.add_btn=QPushButton("+"); self.add_btn.clicked.connect(self.start_add)
-        self.add_btn.setStyleSheet("QPushButton{background:#2563eb;color:white;border:none;border-radius:8px;padding:10px 14px;font-size:15px;font-weight:bold;}QPushButton:hover{background:#1d4ed8;}")
+        self.add_btn.setStyleSheet(btn_style+"QPushButton{background:#2563eb;color:white;font-size:16px;padding:10px 14px;}QPushButton:hover{background:#1d4ed8;}")
 
-        sl.addWidget(self.si); sl.addWidget(sb); sl.addWidget(clr)
+        sl.addWidget(self.si,1); sl.addWidget(sb); sl.addWidget(clr)
         sl.addWidget(self.edit_btn); sl.addWidget(self.add_btn)
         layout.addWidget(sf)
 
@@ -313,16 +326,28 @@ class MainWindow(QMainWindow):
         self.canvas.clicked.connect(self.on_click)
         self.canvas.poi_clicked.connect(self.on_poi_dblclick)
 
-        # 结果
-        self.rl=QListWidget(); self.rl.hide(); self.rl.setMaximumHeight(250)
-        self.rl.setStyleSheet("QListWidget{border:1px solid #e2e8f0;border-radius:8px;font-size:14px;}QListWidget::item{padding:10px 16px;border-bottom:1px solid #f0f0f0;}QListWidget::item:hover{background:#eff6ff;}")
+        # 结果列表
+        self.rl=QListWidget(); self.rl.hide(); self.rl.setMaximumHeight(260)
+        self.rl.setStyleSheet("""
+            QListWidget { border:1px solid #e2e8f0; border-radius:12px; font-size:14px;
+                          background:white; }
+            QListWidget::item { padding:12px 18px; border-bottom:1px solid #f1f5f9;
+                                color:#1e293b; }
+            QListWidget::item:hover { background:#eff6ff; }
+            QListWidget::item:selected { background:#dbeafe; color:#1e40af; }
+        """)
         self.rl.itemClicked.connect(self.on_result)
 
         layout.addWidget(self.canvas,1); layout.addWidget(self.rl)
 
         # 状态栏
-        self.slbl=QLabel("📍 点击地图选起点 | 🔍 搜索目的地 | 右键/ Esc 清除 | 🖱 滚轮缩放")
-        self.slbl.setStyleSheet("padding:6px 12px;background:#1e293b;color:#94a3b8;font-size:12px;")
+        self.slbl=QLabel("📍 点击地图选起点 | 🔍 搜索目的地 | 右键/ESC 清除 | 🖱 滚轮缩放 | 右键拖拽旋转")
+        self.slbl.setFixedHeight(32)
+        self.slbl.setAlignment(Qt.AlignCenter)
+        self.slbl.setStyleSheet("""
+            QLabel { padding:0 16px; background:#0f172a; color:#94a3b8;
+                     font-size:12px; border-top:1px solid #1e293b; }
+        """)
         layout.addWidget(self.slbl)
 
         self.usr=None; self.dst=None; self._worker=None; self._add_mode=False
@@ -362,23 +387,39 @@ class MainWindow(QMainWindow):
 
     def _show_edit_dialog(self,place,lat,lng):
         d=QDialog(self); d.setWindowTitle("编辑地点" if place else "新增地点")
-        d.resize(380,280)
-        layout=QVBoxLayout(d); layout.setSpacing(8)
+        d.resize(400,300); d.setStyleSheet("QDialog{background:#fff;}")
+        layout=QVBoxLayout(d); layout.setSpacing(10); layout.setContentsMargins(20,20,20,20)
 
-        layout.addWidget(QLabel("名称")); name=QLineEdit(place["name"] if place else ""); layout.addWidget(name)
+        title=QLabel("编辑地点" if place else "新增地点")
+        title.setStyleSheet("font-size:18px;font-weight:bold;color:#1e293b;")
+        layout.addWidget(title)
+
+        layout.addWidget(QLabel("名称")); name=QLineEdit(place["name"] if place else "")
+        name.setStyleSheet("padding:8px 12px;border:2px solid #e2e8f0;border-radius:8px;font-size:14px;")
+        layout.addWidget(name)
         layout.addWidget(QLabel("关键词（逗号分隔）"))
-        kw=QLineEdit("，".join(place.get("keywords",[])) if place else ""); layout.addWidget(kw)
-        layout.addWidget(QLabel("详情")); det=QLineEdit(place.get("detail","") if place else ""); layout.addWidget(det)
+        kw=QLineEdit("，".join(place.get("keywords",[])) if place else "")
+        kw.setStyleSheet("padding:8px 12px;border:2px solid #e2e8f0;border-radius:8px;font-size:14px;")
+        layout.addWidget(kw)
+        layout.addWidget(QLabel("详情")); det=QLineEdit(place.get("detail","") if place else "")
+        det.setStyleSheet("padding:8px 12px;border:2px solid #e2e8f0;border-radius:8px;font-size:14px;")
+        layout.addWidget(det)
 
         btns=QHBoxLayout()
+        btn_s="QPushButton{border:none;border-radius:8px;padding:10px 22px;font-size:14px;font-weight:600;}"
         if place:
-            del_btn=QPushButton("删除"); del_btn.setStyleSheet("color:#ef4444;")
+            del_btn=QPushButton("删除")
+            del_btn.setStyleSheet(btn_s+"QPushButton{background:#fef2f2;color:#ef4444;}QPushButton:hover{background:#fee2e2;}")
             def do_del():
                 PLACES.remove(place); save_places(); d.accept(); self.canvas.update()
             del_btn.clicked.connect(do_del); btns.addWidget(del_btn)
         btns.addStretch()
-        cancel=QPushButton("取消"); cancel.clicked.connect(d.reject); btns.addWidget(cancel)
-        ok=QPushButton("保存"); ok.setStyleSheet("background:#2563eb;color:white;"); btns.addWidget(ok)
+        cancel=QPushButton("取消"); cancel.clicked.connect(d.reject)
+        cancel.setStyleSheet(btn_s+"QPushButton{background:#f1f5f9;color:#475569;}QPushButton:hover{background:#e2e8f0;}")
+        btns.addWidget(cancel)
+        ok=QPushButton("保存")
+        ok.setStyleSheet(btn_s+"QPushButton{background:#2563eb;color:white;}QPushButton:hover{background:#1d4ed8;}")
+        btns.addWidget(ok)
         def do_save():
             n=name.text().strip()
             if not n: return
@@ -418,8 +459,8 @@ class MainWindow(QMainWindow):
     def start_add(self):
         self._add_mode=not self._add_mode
         if self._add_mode:
-            self.add_btn.setText("🎯"); self.add_btn.setStyleSheet("QPushButton{background:#fef08a;color:#854d0e;border:none;border-radius:8px;padding:10px 14px;font-size:15px;}")
-            self.canvas.setCursor(Qt.CrossCursor); self.slbl.setText("🎯 点击地图选择新地点位置")
+            self.add_btn.setText("🎯"); self.add_btn.setStyleSheet("QPushButton{border:none;border-radius:10px;padding:10px 14px;font-size:16px;background:#fef08a;color:#854d0e;}")
+            self.canvas.setCursor(Qt.CrossCursor); self.slbl.setText("🎯 点击地图选择新地点位置 | 再次点击取消")
         else:
             self.add_btn.setText("+"); self.add_btn.setStyleSheet("QPushButton{background:#2563eb;color:white;border:none;border-radius:8px;padding:10px 14px;font-size:15px;}")
             self.canvas.setCursor(Qt.ArrowCursor); self.slbl.setText("")

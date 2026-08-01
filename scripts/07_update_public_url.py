@@ -45,11 +45,15 @@ else:
     )
 
 readme_path.write_text(content, encoding="utf-8")
-print("README.md updated")
 
-# 3. Git 提交并推送
+# 3. Git 提交并推送（仅在有变更时）
+import hashlib
 subprocess.run(["git", "add", "README.md"], check=True)
-subprocess.run(["git", "commit", "-m", f"更新公网地址: {url}"], check=True)
-subprocess.run(["git", "push"], check=True)
-print(f"Pushed to GitHub!")
+diff = subprocess.run(["git", "diff", "--cached", "--quiet", "README.md"])
+if diff.returncode != 0:
+    subprocess.run(["git", "commit", "-m", f"Update public URL: {url}"], check=True)
+    subprocess.run(["git", "push"], check=True)
+    print("Pushed to GitHub!")
+else:
+    print("URL unchanged, no push needed.")
 print(f"  公网地址: {url}")

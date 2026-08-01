@@ -22,6 +22,11 @@ static/tiles/
 # ngrok
 ngrok.exe
 
+# PyInstaller
+build/
+dist/
+*.spec
+
 # OS
 .DS_Store
 Thumbs.db

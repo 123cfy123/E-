@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLineEdit,
     QListWidget, QListWidgetItem, QLabel, QVBoxLayout, QHBoxLayout,
     QFrame, QPushButton, QSizePolicy)
-from PySide6.QtCore import Qt, QTimer, QThread, Signal
+from PySide6.QtCore import Qt, QPoint, QTimer, QThread, Signal
 from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QFont, QFontMetrics
 
 # ── 配置 ──────────────────────────────────────────────────

@@ -22,6 +22,8 @@
 | 路网 | OpenStreetMap + QGIS 手动补全 |
 | 底图 | OpenStreetMap 瓦片（本地缓存） |
 
+> 公网访问：**[https://mandatory-starfish-conch.ngrok-free.dev](https://mandatory-starfish-conch.ngrok-free.dev)**（实时更新）
+
 ## 快速启动
 
 ```bash

@@ -136,10 +136,7 @@ const map = new maplibregl.Map({
     sources: {
       osm: {
         type: "raster",
-        // 公网走 OSM CDN（不经过 ngrok 隧道），本地走缓存
-        tiles: location.hostname.includes("ngrok")
-          ? ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"]
-          : ["/tiles/{z}/{x}/{y}.png"],
+        tiles: ["/tiles/{z}/{x}/{y}.png"],
         tileSize: 256,
         attribution: "&copy; OpenStreetMap"
       }

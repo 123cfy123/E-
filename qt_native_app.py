@@ -1,474 +1,438 @@
 """
-E刻校园 Qt 原生版 — 零浏览器依赖
+E刻校园 Qt 原生版 — 界面和功能对齐网页版
 纯 Python + PySide6 + 瓦片手工渲染
 """
 
 import sys, math, json
 from pathlib import Path
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLineEdit,
-    QListWidget, QListWidgetItem, QLabel, QVBoxLayout, QHBoxLayout,
-    QFrame, QPushButton, QSizePolicy)
-from PySide6.QtCore import Qt, QPoint, QTimer, QThread, Signal
-from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QFont, QFontMetrics
+from PySide6.QtWidgets import *
+from PySide6.QtCore import Qt, QPoint, QPointF, QTimer, QThread, Signal, QRectF
+from PySide6.QtGui import (QPainter, QPixmap, QColor, QPen, QFont,
+                            QFontMetrics, QPainterPath, QPolygonF, QBrush)
 
-# ── 配置 ──────────────────────────────────────────────────
-TILE_DIR = Path("static/tiles")
-DATA_DIR = Path("data")
+# ── 配置 ──
+TILE_DIR, DATA_DIR = Path("static/tiles"), Path("data")
 CENTER_LAT, CENTER_LNG = 31.0345, 121.4555
-MIN_ZOOM, MAX_ZOOM = 14, 18
-TILE_SIZE = 256
+MIN_ZOOM, MAX_ZOOM, TILE_SIZE = 15, 18, 256
 
-# ── 后端逻辑 ──────────────────────────────────────────────
-import osmnx as ox
-import networkx as nx
-from shapely.geometry import Point, LineString
+# ── 后端 ──
+import osmnx as ox, networkx as nx
+from shapely.geometry import Point, LineString, Polygon
+from shapely.ops import unary_union
 
-print("Loading road network...")
+print("Loading...")
 G = ox.load_graphml(DATA_DIR / "ecnu_walk_merged.graphml")
-if "crs" not in G.graph:
-    G.graph["crs"] = "EPSG:4326"
-print(f"  {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+if "crs" not in G.graph: G.graph["crs"] = "EPSG:4326"
+print(f"  Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
 with open(DATA_DIR / "campus_places.json", encoding="utf-8") as f:
     PLACES = json.load(f)
-print(f"  {len(PLACES)} places")
+print(f"  Places: {len(PLACES)}")
 
-# ── 坐标 ──────────────────────────────────────────────────
+with open(DATA_DIR / "campus_boundary.geojson") as f:
+    BOUNDARY_COORDS = json.load(f)["features"][0]["geometry"]["coordinates"][0]
+    BOUNDARY_POLY = Polygon(BOUNDARY_COORDS)
+print(f"  Boundary: {len(BOUNDARY_COORDS)} points")
 
-def latlng_to_tile(lat, lng, zoom):
-    n = 2.0 ** zoom
-    x = (lng + 180.0) / 360.0 * n
-    lat_rad = math.radians(lat)
-    y = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
-    return x, y
+# ── 坐标工具 ──
+def ll2tile(lat, lng, zoom):
+    n = 2.0**zoom
+    return ((lng+180)/360*n,
+            (1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n)
 
-def tile_to_latlng(tx, ty, zoom):
-    n = 2.0 ** zoom
-    lng = tx / n * 360.0 - 180.0
-    lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * ty / n))))
-    return lat, lng
+def tile2ll(tx, ty, zoom):
+    n = 2.0**zoom
+    return (math.degrees(math.atan(math.sinh(math.pi*(1-2*ty/n)))),
+            tx/n*360-180)
 
-# ── 路径计算（后台线程）───────────────────────────────────
-
+# ── 路由线程 ──
 class RouteWorker(QThread):
-    finished = Signal(object)
-
-    def __init__(self, flat, flng, tlat, tlng):
+    done = Signal(object)
+    def __init__(self, fla, fln, tla, tln):
         super().__init__()
-        self.flat, self.flng = flat, flng
-        self.tlat, self.tlng = tlat, tlng
-
+        self.a, self.b, self.c, self.d = fla, fln, tla, tln
     def run(self):
-        self.finished.emit(_find_route(self.flat, self.flng, self.tlat, self.tlng))
+        self.done.emit(_route(self.a, self.b, self.c, self.d))
 
-def _find_route(from_lat, from_lng, to_lat, to_lng):
+def _route(fla, fln, tla, tln):
     def snap(lng, lat):
         pt = Point(lng, lat)
-        best_dist, best_proj, best_u, best_v = float("inf"), None, None, None
-        for u, v, data in G.edges(data=True):
-            geom = data.get("geometry")
-            if geom is None:
-                ux, uy = G.nodes[u]["x"], G.nodes[u]["y"]
-                vx, vy = G.nodes[v]["x"], G.nodes[v]["y"]
-                geom = LineString([(ux, uy), (vx, vy)])
-            dist = geom.distance(pt)
-            if dist < best_dist:
-                best_dist = dist
-                proj = geom.interpolate(geom.project(pt))
-                best_proj = (proj.y, proj.x)
-                best_u, best_v = u, v
-        if best_proj is None:
-            node = ox.distance.nearest_nodes(G, lng, lat)
-            return (G.nodes[node]["y"], G.nodes[node]["x"]), node
-        du = (G.nodes[best_u]["y"]-best_proj[0])**2 + (G.nodes[best_u]["x"]-best_proj[1])**2
-        dv = (G.nodes[best_v]["y"]-best_proj[0])**2 + (G.nodes[best_v]["x"]-best_proj[1])**2
-        return best_proj, (best_u if du < dv else best_v)
+        bd, bp, bu, bv = float("inf"), None, None, None
+        for u, v, d in G.edges(data=True):
+            g = d.get("geometry")
+            if g is None:
+                g = LineString([(G.nodes[u]["x"],G.nodes[u]["y"]),
+                                (G.nodes[v]["x"],G.nodes[v]["y"])])
+            dist = g.distance(pt)
+            if dist < bd:
+                bd = dist; p = g.interpolate(g.project(pt))
+                bp, bu, bv = (p.y, p.x), u, v
+        if bp is None:
+            n = ox.distance.nearest_nodes(G, lng, lat)
+            return (G.nodes[n]["y"], G.nodes[n]["x"]), n
+        du = (G.nodes[bu]["y"]-bp[0])**2+(G.nodes[bu]["x"]-bp[1])**2
+        dv = (G.nodes[bv]["y"]-bp[0])**2+(G.nodes[bv]["x"]-bp[1])**2
+        return bp, (bu if du<dv else bv)
 
-    from_proj, from_entry = snap(from_lng, from_lat)
-    to_proj, to_entry = snap(to_lng, to_lat)
-    if from_entry == to_entry:
-        return None
+    fp, fe = snap(fln, fla)
+    tp, te = snap(tln, tla)
+    if fe == te: return None
+    try: path = nx.shortest_path(G, fe, te, weight="length")
+    except:
+        try: path = nx.shortest_path(G.to_undirected(), fe, te, weight="length")
+        except: return None
 
-    try:
-        path = nx.shortest_path(G, from_entry, to_entry, weight="length")
-    except nx.NetworkXNoPath:
-        try:
-            path = nx.shortest_path(G.to_undirected(), from_entry, to_entry, weight="length")
-        except nx.NetworkXNoPath:
-            return None
-
-    coords, total = [[from_proj[0], from_proj[1]]], 0.0
-    al = lambda dy, dx: math.sqrt((dy*111320)**2 + (dx*111320*0.85)**2)
-    total += al(G.nodes[from_entry]["y"]-from_proj[0], G.nodes[from_entry]["x"]-from_proj[1])
-
+    coords, total = [[fp[0],fp[1]]], 0.0
+    al = lambda dy,dx: math.sqrt((dy*111320)**2+(dx*111320*0.85)**2)
+    total += al(G.nodes[fe]["y"]-fp[0], G.nodes[fe]["x"]-fp[1])
     for i in range(len(path)-1):
         u, v = path[i], path[i+1]
-        ed = G.get_edge_data(u, v) or G.get_edge_data(v, u)
+        ed = G.get_edge_data(u,v) or G.get_edge_data(v,u)
         if not ed: continue
-        d = min(ed.values(), key=lambda x: x.get("length", 1e9))
-        total += d.get("length", 0)
+        d = min(ed.values(), key=lambda x: x.get("length",1e9))
+        total += d.get("length",0)
         g = d.get("geometry")
         if g: coords.extend([[c[1],c[0]] for c in g.coords])
         else:
-            coords.append([G.nodes[u]["y"], G.nodes[u]["x"]])
-            if i == len(path)-2: coords.append([G.nodes[v]["y"], G.nodes[v]["x"]])
-
-    coords.append([to_proj[0], to_proj[1]])
-    total += al(to_proj[0]-G.nodes[to_entry]["y"], to_proj[1]-G.nodes[to_entry]["x"])
-
-    dedup = [coords[0]]
+            coords.append([G.nodes[u]["y"],G.nodes[u]["x"]])
+            if i==len(path)-2: coords.append([G.nodes[v]["y"],G.nodes[v]["x"]])
+    coords.append([tp[0],tp[1]])
+    total += al(tp[0]-G.nodes[te]["y"], tp[1]-G.nodes[te]["x"])
+    ded = [coords[0]]
     for c in coords[1:]:
-        if c != dedup[-1]: dedup.append(c)
-
-    return {"coordinates": dedup, "distance_m": round(total,1),
-            "distance_km": round(total/1000,2), "time_min": round(total/1.2/60,1)}
+        if c != ded[-1]: ded.append(c)
+    return {"coords":ded,"dist_m":round(total,1),"dist_km":round(total/1e3,2),
+            "time_m":round(total/1.2/60,1)}
 
 def search_places(q):
     if not q: return PLACES[:8]
-    results = []
+    r = []
     for p in PLACES:
-        score = 0
-        if q in p["name"]: score = 10
-        for kw in p.get("keywords", []):
-            if q in kw: score = max(score, 5)
-            elif kw in q: score = max(score, 3)
-        if score > 0:
-            pc = dict(p); pc["_score"] = score; results.append(pc)
-    results.sort(key=lambda x: x["_score"], reverse=True)
-    return results[:8]
+        s = 0
+        if q in p["name"]: s = 10
+        for kw in p.get("keywords",[]):
+            if q in kw: s = max(s,5)
+            elif kw in q: s = max(s,3)
+        if s>0: pc=dict(p); pc["_s"]=s; r.append(pc)
+    r.sort(key=lambda x:x["_s"], reverse=True)
+    return r[:8]
 
-# ── 地图画布 ──────────────────────────────────────────────
-
+# ── 地图画布 ──
 class MapCanvas(QWidget):
+    clicked = Signal(float, float)  # lat, lng
+
     def __init__(self):
         super().__init__()
-        self.zoom = 16
-        self.cx, self.cy = CENTER_LNG, CENTER_LAT
-        self.dragging = False
-        self.last_mouse = None
-        self.tile_cache = {}
+        self.zoom, self.cx, self.cy = 16, CENTER_LNG, CENTER_LAT
+        self.drag = False; self.last_pos = None
+        self.cache = {}
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.user_marker = None
-        self.dest_marker = None
-        self.route_coords = None
-        self.route_info = ""
+        # 图层数据
+        self.usr = None      # (lat,lng)
+        self.dst_marker = None
+        self.route = None    # [[lat,lng],...]
+        self.route_text = ""
+        self._rnet = []      # 路网
+        self._mask_poly = None  # 校园遮罩路径
 
-    def txy(self, lng):
-        return (lng + 180) / 360 * (2 ** self.zoom)
+    def txy(self, lng): return (lng+180)/360*(2**self.zoom)
+    def tyy(self, lat): return (1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*(2**self.zoom)
 
-    def tyy(self, lat):
-        r = math.radians(lat)
-        return (1 - math.asinh(math.tan(r)) / math.pi) / 2 * (2 ** self.zoom)
-
-    def pixel_to_latlng(self, px, py):
+    def ll2px(self, lat, lng):
         w, h = self.width(), self.height()
-        tx = self.txy(self.cx) + (px - w/2) / TILE_SIZE
-        ty = self.tyy(self.cy) + (py - h/2) / TILE_SIZE
-        return tile_to_latlng(tx, ty, self.zoom)
+        tx, ty = ll2tile(lat, lng, self.zoom)
+        return (int((tx-self.txy(self.cx))*TILE_SIZE+w/2),
+                int((ty-self.tyy(self.cy))*TILE_SIZE+h/2))
 
-    def latlng_to_pixel(self, lat, lng):
+    def px2ll(self, px, py):
         w, h = self.width(), self.height()
-        tx, ty = latlng_to_tile(lat, lng, self.zoom)
-        return (int((tx - self.txy(self.cx)) * TILE_SIZE + w/2),
-                int((ty - self.tyy(self.cy)) * TILE_SIZE + h/2))
+        return tile2ll(self.txy(self.cx)+(px-w/2)/TILE_SIZE,
+                       self.tyy(self.cy)+(py-h/2)/TILE_SIZE, self.zoom)
 
     def load_tile(self, z, x, y):
-        key = (z, x, y)
-        if key in self.tile_cache:
-            return self.tile_cache[key]
-        path = TILE_DIR / str(z) / str(x) / f"{y}.png"
-        pm = QPixmap(str(path)) if path.exists() else QPixmap(TILE_SIZE, TILE_SIZE)
-        if not path.exists():
-            pm.fill(QColor(240, 240, 240))
-        self.tile_cache[key] = pm
-        if len(self.tile_cache) > 300:
-            self.tile_cache.pop(next(iter(self.tile_cache)))
+        k = (z,x,y)
+        if k in self.cache: return self.cache[k]
+        p = TILE_DIR/str(z)/str(x)/f"{y}.png"
+        pm = QPixmap(str(p)) if p.exists() else QPixmap(TILE_SIZE,TILE_SIZE)
+        if not p.exists(): pm.fill(QColor(240,240,240))
+        self.cache[k] = pm
+        if len(self.cache)>300: self.cache.pop(next(iter(self.cache)))
         return pm
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-
-        # 瓦片
-        ctx = self.txy(self.cx)
-        cty = self.tyy(self.cy)
-        base_tx, base_ty = int(ctx), int(cty)
-        ox = int((ctx - base_tx) * TILE_SIZE)
-        oy = int((cty - base_ty) * TILE_SIZE)
-
-        for dx in range(-2, w // TILE_SIZE + 3):
-            for dy in range(-2, h // TILE_SIZE + 3):
-                tx, ty = base_tx + dx, base_ty + dy
-                if 0 <= tx < 2**self.zoom and 0 <= ty < 2**self.zoom:
-                    pm = self.load_tile(self.zoom, tx, ty)
-                    painter.drawPixmap(w//2 + dx*TILE_SIZE - ox, h//2 + dy*TILE_SIZE - oy, pm)
-
-        # 路网
-        if self.zoom >= 15 and hasattr(self, '_rnet'):
-            painter.setPen(QPen(QColor(248, 113, 113, 100), 1))
-            for line in self._rnet:
-                pts = [QPoint(*self.latlng_to_pixel(*c)) for c in line]
-                for i in range(len(pts)-1):
-                    painter.drawLine(pts[i], pts[i+1])
-
-        # 用户标记
-        if self.user_marker:
-            x, y = self.latlng_to_pixel(*self.user_marker)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(37, 99, 235))
-            painter.drawEllipse(QPoint(x, y), 8, 8)
-            painter.setBrush(Qt.white)
-            painter.drawEllipse(QPoint(x, y), 4, 4)
-
-        # 目的地标记
-        if self.dest_marker:
-            x, y = self.latlng_to_pixel(*self.dest_marker)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(231, 76, 60))
-            painter.drawEllipse(QPoint(x, y), 10, 10)
-            painter.setBrush(Qt.white)
-            painter.drawEllipse(QPoint(x, y), 5, 5)
-
-        # 路线
-        if self.route_coords:
-            painter.setPen(QPen(QColor(37, 99, 235), 4))
-            pts = [QPoint(*self.latlng_to_pixel(*c)) for c in self.route_coords]
-            for i in range(len(pts)-1):
-                painter.drawLine(pts[i], pts[i+1])
-
-        # 路线信息
-        if self.route_info:
-            font = QFont("Microsoft YaHei", 11)
-            painter.setFont(font)
-            fm = QFontMetrics(font)
-            tw, th = fm.horizontalAdvance(self.route_info) + 20, fm.height() + 12
-            rx, ry = 10, h - th - 20
-            painter.setBrush(QColor(255, 255, 255, 220))
-            painter.setPen(Qt.NoPen)
-            painter.drawRoundedRect(rx, ry, tw, th, 8, 8)
-            painter.setPen(QColor(37, 99, 235))
-            painter.drawText(rx + 10, ry + fm.ascent() + 6, self.route_info)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.dragging = True
-            self.last_mouse = event.position()
-            self.setCursor(Qt.ClosedHandCursor)
-
-    def mouseMoveEvent(self, event):
-        if self.dragging and self.last_mouse is not None:
-            pos = event.position()
-            dx = pos.x() - self.last_mouse.x()
-            dy = pos.y() - self.last_mouse.y()
-            self.last_mouse = pos
-            n = 2.0 ** self.zoom
-            self.cx -= dx * 360.0 / (TILE_SIZE * n)
-            # Mercator 校正：纬度变化需要考虑当前纬度
-            self.cy += dy * 180.0 / (TILE_SIZE * n * math.cos(math.radians(self.cy)))
-            self.update()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self.dragging:
-            self.dragging = False
-            self.setCursor(Qt.ArrowCursor)
-            if self.last_mouse is not None and (event.position() - self.last_mouse).manhattanLength() < 5:
-                lat, lng = self.pixel_to_latlng(event.position().x(), event.position().y())
-                self.on_map_click(lat, lng)
-
-    def wheelEvent(self, event):
-        delta = event.angleDelta().y()
-        if delta > 0 and self.zoom < MAX_ZOOM:
-            self.zoom += 1
-        elif delta < 0 and self.zoom > MIN_ZOOM:
-            self.zoom -= 1
-        self.update()
-
-    def on_map_click(self, lat, lng):
-        pass
 
     def load_roadnet(self):
         try:
             import geopandas as gpd
-            edges = gpd.read_file(DATA_DIR / "ecnu_edges_merged.geojson")
-            self._rnet = [[(c[1], c[0]) for c in g.coords]
-                          for g in edges.geometry if g and not g.is_empty]
-            print(f"Loaded {len(self._rnet)} road segments")
-        except Exception as e:
-            print(f"Roadnet load failed: {e}")
+            e = gpd.read_file(DATA_DIR/"ecnu_edges_merged.geojson")
+            self._rnet = [[(c[1],c[0]) for c in g.coords]
+                          for g in e.geometry if g and not g.is_empty]
+        except:
             self._rnet = []
 
-# ── 主窗口 ────────────────────────────────────────────────
+    def fit_campus(self):
+        """自适应校园边界"""
+        xs = [c[0] for c in BOUNDARY_COORDS]
+        ys = [c[1] for c in BOUNDARY_COORDS]
+        self.cx = (min(xs)+max(xs))/2
+        self.cy = (min(ys)+max(ys))/2
+        # 找合适缩放级别
+        for z in range(MAX_ZOOM, MIN_ZOOM-1, -1):
+            tx1, ty1 = ll2tile(max(ys), min(xs), z)
+            tx2, ty2 = ll2tile(min(ys), max(xs), z)
+            pw = abs(tx2-tx1)*TILE_SIZE
+            ph = abs(ty2-ty1)*TILE_SIZE
+            if pw < self.width()*0.8 and ph < self.height()*0.8:
+                self.zoom = max(z, MIN_ZOOM)
+                break
+        self.update()
 
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # 1. 瓦片
+        ctx, cty = self.txy(self.cx), self.tyy(self.cy)
+        bx, by = int(ctx), int(cty)
+        ox, oy = int((ctx-bx)*TILE_SIZE), int((cty-by)*TILE_SIZE)
+        mz = 2**self.zoom
+        for dx in range(-2, w//TILE_SIZE+3):
+            for dy in range(-2, h//TILE_SIZE+3):
+                tx, ty = bx+dx, by+dy
+                if 0<=tx<mz and 0<=ty<mz:
+                    p.drawPixmap(w//2+dx*TILE_SIZE-ox, h//2+dy*TILE_SIZE-oy,
+                                 self.load_tile(self.zoom,tx,ty))
+
+        # 2. 路网
+        if self.zoom>=15 and self._rnet:
+            p.setPen(QPen(QColor(248,113,113,100), 1))
+            for line in self._rnet:
+                pts = [QPoint(*self.ll2px(*c)) for c in line]
+                for i in range(len(pts)-1): p.drawLine(pts[i],pts[i+1])
+
+        # 3. POI 标记
+        font = QFont("Microsoft YaHei", 9)
+        p.setFont(font)
+        for pl in PLACES:
+            px, py = self.ll2px(pl["lat"], pl["lng"])
+            # 检查是否在屏幕内
+            if -50<px<w+50 and -50<py<h+50:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(245,158,11))
+                p.drawEllipse(QPoint(px,py), 5, 5)
+                p.setPen(QColor(30,41,59))
+                p.drawText(px+8, py+4, pl["name"][:6])
+
+        # 4. 起点
+        if self.usr:
+            x, y = self.ll2px(*self.usr)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(37,99,235))
+            p.drawEllipse(QPoint(x,y), 8, 8)
+            p.setBrush(Qt.white)
+            p.drawEllipse(QPoint(x,y), 4, 4)
+
+        # 5. 目的地
+        if self.dst_marker:
+            x, y = self.ll2px(*self.dst_marker)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(231,76,60))
+            p.drawEllipse(QPoint(x,y), 10, 10)
+            p.setBrush(Qt.white)
+            p.drawEllipse(QPoint(x,y), 5, 5)
+
+        # 6. 路线
+        if self.route:
+            p.setPen(QPen(QColor(37,99,235), 4))
+            pts = [QPoint(*self.ll2px(*c)) for c in self.route]
+            for i in range(len(pts)-1): p.drawLine(pts[i],pts[i+1])
+
+        # 7. 遮罩 + 边界
+        if BOUNDARY_COORDS:
+            hole = QPolygonF()
+            for lng, lat in BOUNDARY_COORDS:
+                hole.append(QPointF(*self.ll2px(lat, lng)))
+            mask_path = QPainterPath()
+            mask_path.addRect(QRectF(-5000, -5000, w+10000, h+10000))
+            mask_path.addPolygon(hole)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0,0,0))
+            p.drawPath(mask_path)
+            # 边界线
+            p.setPen(QPen(QColor(37,99,235), 2, Qt.DashLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawPolygon(hole)
+
+        # 9. 路线信息卡片
+        if self.route_text:
+            font2 = QFont("Microsoft YaHei", 12)
+            p.setFont(font2)
+            fm = QFontMetrics(font2)
+            dist, time = self.route_text.split("·")
+            tw = max(fm.horizontalAdvance(dist), fm.horizontalAdvance(time))+30
+            th = fm.height()*2+20
+            rx, ry = 12, h-th-20
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(255,255,255,230))
+            p.drawRoundedRect(rx, ry, tw, th, 10, 10)
+            p.setPen(QColor(37,99,235))
+            fbig = QFont("Microsoft YaHei", 16)
+            fbig.setBold(True)
+            p.setFont(fbig)
+            p.drawText(rx+15, ry+fm.ascent()+5, dist.strip())
+            p.setFont(font2)
+            p.setPen(QColor(100,116,139))
+            p.drawText(rx+15, ry+fm.height()+fm.ascent()+8, time.strip())
+
+    def mousePressEvent(self, e):
+        if e.button()==Qt.LeftButton:
+            self.drag = True; self.last_pos = e.position()
+            self.setCursor(Qt.ClosedHandCursor)
+
+    def mouseMoveEvent(self, e):
+        if self.drag and self.last_pos is not None:
+            pos = e.position()
+            dx, dy = pos.x()-self.last_pos.x(), pos.y()-self.last_pos.y()
+            self.last_pos = pos
+            n = 2.0**self.zoom
+            self.cx -= dx*360.0/(TILE_SIZE*n)
+            self.cy += dy*180.0/(TILE_SIZE*n*math.cos(math.radians(self.cy)))
+            self.update()
+
+    def mouseReleaseEvent(self, e):
+        if e.button()==Qt.LeftButton and self.drag:
+            self.drag = False; self.setCursor(Qt.ArrowCursor)
+            if self.last_pos is not None and (e.position()-self.last_pos).manhattanLength()<5:
+                lat, lng = self.px2ll(e.position().x(), e.position().y())
+                self.clicked.emit(lat, lng)
+
+    def wheelEvent(self, e):
+        d = e.angleDelta().y()
+        if d>0 and self.zoom<MAX_ZOOM: self.zoom+=1
+        elif d<0 and self.zoom>MIN_ZOOM: self.zoom-=1
+        self.update()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.update()
+
+# ── 主窗口 ──
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("E刻校园 - 华师大闵行校区智能导航")
         self.resize(1200, 800)
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        cw = QWidget(); self.setCentralWidget(cw)
+        layout = QVBoxLayout(cw)
+        layout.setContentsMargins(0,0,0,0); layout.setSpacing(0)
 
         # 搜索栏
         sf = QFrame()
-        sf.setStyleSheet("background: white; border-bottom: 1px solid #e2e8f0;")
-        sl = QHBoxLayout(sf)
-        sl.setContentsMargins(100, 8, 100, 8)
+        sf.setStyleSheet("background:white; border-bottom:1px solid #e2e8f0;")
+        sl = QHBoxLayout(sf); sl.setContentsMargins(100,8,100,8)
 
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("搜一搜：打印成绩单 / 打篮球 / 补办校园卡...")
-        self.search_input.setStyleSheet("""
-            QLineEdit { padding:10px 16px; border:1px solid #e2e8f0; border-radius:8px;
-                        font-size:15px; background:#f8fafc; }
-            QLineEdit:focus { border-color:#2563eb; background:white; }
-        """)
-        self.search_input.returnPressed.connect(self.do_search)
+        self.si = QLineEdit()
+        self.si.setPlaceholderText("搜一搜：打印成绩单 / 打篮球 / 补办校园卡...")
+        self.si.setStyleSheet("QLineEdit{padding:10px 16px;border:1px solid #e2e8f0;border-radius:8px;font-size:15px;background:#f8fafc;}QLineEdit:focus{border-color:#2563eb;background:white;}")
+        self.si.returnPressed.connect(self.do_search)
 
         sb = QPushButton("搜索")
-        sb.setStyleSheet("""
-            QPushButton { background:#2563eb; color:white; border:none; border-radius:8px;
-                          padding:10px 20px; font-size:15px; }
-            QPushButton:hover { background:#1d4ed8; }
-        """)
+        sb.setStyleSheet("QPushButton{background:#2563eb;color:white;border:none;border-radius:8px;padding:10px 20px;font-size:15px;}QPushButton:hover{background:#1d4ed8;}")
         sb.clicked.connect(self.do_search)
 
-        clear_btn = QPushButton("清除")
-        clear_btn.setStyleSheet("""
-            QPushButton { background:#f1f5f9; color:#64748b; border:none; border-radius:8px;
-                          padding:10px 16px; font-size:14px; }
-            QPushButton:hover { background:#e2e8f0; }
-        """)
-        clear_btn.clicked.connect(self.clear_all)
+        clr = QPushButton("清除")
+        clr.setStyleSheet("QPushButton{background:#f1f5f9;color:#64748b;border:none;border-radius:8px;padding:10px 16px;font-size:14px;}QPushButton:hover{background:#e2e8f0;}")
+        clr.clicked.connect(self.clear_all)
 
-        sl.addWidget(self.search_input)
-        sl.addWidget(sb)
-        sl.addWidget(clear_btn)
+        sl.addWidget(self.si); sl.addWidget(sb); sl.addWidget(clr)
         layout.addWidget(sf)
 
         # 地图
-        ma = QWidget()
-        ml = QVBoxLayout(ma)
-        ml.setContentsMargins(0, 0, 0, 0)
-        ml.setSpacing(0)
-
         self.canvas = MapCanvas()
-        self.canvas.on_map_click = self.on_map_click
+        self.canvas.clicked.connect(self.on_click)
 
-        self.result_list = QListWidget()
-        self.result_list.hide()
-        self.result_list.setMaximumHeight(250)
-        self.result_list.setStyleSheet("""
-            QListWidget { border:1px solid #e2e8f0; border-radius:8px; font-size:14px; }
-            QListWidget::item { padding:10px 16px; border-bottom:1px solid #f0f0f0; }
-            QListWidget::item:hover { background:#eff6ff; }
-        """)
-        self.result_list.itemClicked.connect(self.on_result_clicked)
+        # 结果列表
+        self.rl = QListWidget()
+        self.rl.hide(); self.rl.setMaximumHeight(250)
+        self.rl.setStyleSheet("QListWidget{border:1px solid #e2e8f0;border-radius:8px;font-size:14px;}QListWidget::item{padding:10px 16px;border-bottom:1px solid #f0f0f0;}QListWidget::item:hover{background:#eff6ff;}")
+        self.rl.itemClicked.connect(self.on_result)
 
-        ml.addWidget(self.canvas, 1)
-        ml.addWidget(self.result_list)
-        layout.addWidget(ma, 1)
+        layout.addWidget(self.canvas, 1)
+        layout.addWidget(self.rl)
 
         # 状态栏
-        self.status_label = QLabel("📍 点击地图选起点 | 🔍 搜索目的地 | 🖱 滚轮缩放 | 拖拽平移 | Esc 清除")
-        self.status_label.setStyleSheet(
-            "padding:6px 12px; background:#1e293b; color:#94a3b8; font-size:12px;")
-        layout.addWidget(self.status_label)
+        self.slbl = QLabel("📍 点击地图/标记 选起点 | 🔍 搜索目的地 | 🖱 滚轮缩放 | 右键平移 | Esc 清除")
+        self.slbl.setStyleSheet("padding:6px 12px;background:#1e293b;color:#94a3b8;font-size:12px;")
+        layout.addWidget(self.slbl)
 
-        self.user_latlng = None
-        self.dest_place = None
-        self._route_worker = None
+        self.usr = None; self.dst = None; self._worker = None
 
-        QTimer.singleShot(100, self.load_roadnet)
+        # 加载数据
+        QTimer.singleShot(200, self.init_data)
 
-    def load_roadnet(self):
+    def init_data(self):
         self.canvas.load_roadnet()
+        QTimer.singleShot(500, self.canvas.fit_campus)
         self.canvas.update()
 
     def do_search(self):
-        q = self.search_input.text().strip()
+        q = self.si.text().strip()
         results = search_places(q)
-        self.result_list.clear()
+        self.rl.clear()
         if results:
             for p in results:
-                item = QListWidgetItem(f"{p['name']}  —  {p.get('detail', '')}")
-                item.setData(Qt.UserRole, p)
-                self.result_list.addItem(item)
-            self.result_list.show()
+                it = QListWidgetItem(f"{p['name']}  —  {p.get('detail','')}")
+                it.setData(Qt.UserRole, p); self.rl.addItem(it)
+            self.rl.show()
         else:
-            self.result_list.hide()
+            self.rl.hide()
 
-    def on_result_clicked(self, item):
+    def on_result(self, item):
         place = item.data(Qt.UserRole)
-        self.result_list.hide()
-        self.search_input.setText(place["name"])
-        self.dest_place = place
-        self.canvas.dest_marker = (place["lat"], place["lng"])
-        if self.user_latlng:
-            self.calc_route()
-        else:
-            self.canvas.update()
-            self.status_label.setText(f"🎯 目的地: {place['name']} | 请点击地图设置起点")
+        self.rl.hide(); self.si.setText(place["name"])
+        self.dst = place
+        self.canvas.dst_marker = (place["lat"], place["lng"])
+        if self.usr: self.do_route()
+        else: self.canvas.update(); self.slbl.setText(f"🎯 目的地: {place['name']} | 请点击地图/POI标记选择起点")
 
-    def on_map_click(self, lat, lng):
-        self.user_latlng = (lat, lng)
-        self.canvas.user_marker = (lat, lng)
-        # 清除旧路线
-        self.canvas.route_coords = None
-        self.canvas.route_info = ""
-        if self.dest_place:
-            self.calc_route()
-        else:
-            self.canvas.update()
-            self.status_label.setText(f"📍 起点: ({lat:.5f}, {lng:.5f}) | 搜索目的地")
+    def on_click(self, lat, lng):
+        self.usr = (lat, lng)
+        self.canvas.usr = (lat, lng)
+        self.canvas.route = None; self.canvas.route_text = ""
+        if self.dst: self.do_route()
+        else: self.canvas.update(); self.slbl.setText(f"📍 起点: ({lat:.5f},{lng:.5f}) | 搜索目的地")
 
-    def calc_route(self):
-        if not self.user_latlng or not self.dest_place:
-            return
-        self.status_label.setText("计算路线中...")
+    def do_route(self):
+        if not self.usr or not self.dst: return
+        self.slbl.setText("计算路线中...")
         QApplication.processEvents()
+        self._worker = RouteWorker(self.usr[0],self.usr[1],self.dst["lat"],self.dst["lng"])
+        self._worker.done.connect(self.on_route); self._worker.start()
 
-        # 后台线程计算
-        self._route_worker = RouteWorker(
-            self.user_latlng[0], self.user_latlng[1],
-            self.dest_place["lat"], self.dest_place["lng"])
-        self._route_worker.finished.connect(self.on_route_ready)
-        self._route_worker.start()
-
-    def on_route_ready(self, result):
-        if result:
-            self.canvas.route_coords = result["coordinates"]
-            self.canvas.route_info = f"{result['distance_km']} km · {result['time_min']} 分钟"
-            self.status_label.setText(
-                f"✅ {self.dest_place['name']} | {result['distance_km']} km | 约 {result['time_min']} 分钟")
+    def on_route(self, r):
+        if r:
+            self.canvas.route = r["coords"]
+            self.canvas.route_text = f"  {r['dist_km']} km  ·  {r['time_m']} 分钟"
+            self.slbl.setText(f"✅ {self.dst['name']} | {r['dist_km']}km | 约{r['time_m']}分钟")
         else:
-            self.canvas.route_coords = None
-            self.canvas.route_info = ""
-            self.status_label.setText("❌ 找不到可达路径")
+            self.canvas.route = None; self.canvas.route_text = ""
+            self.slbl.setText("❌ 找不到可达路径")
         self.canvas.update()
 
     def clear_all(self):
-        self.user_latlng = None
-        self.dest_place = None
-        self.canvas.user_marker = None
-        self.canvas.dest_marker = None
-        self.canvas.route_coords = None
-        self.canvas.route_info = ""
-        self.search_input.clear()
-        self.result_list.hide()
-        self.canvas.update()
-        self.status_label.setText("📍 点击地图选起点 | 🔍 搜索目的地 | 🖱 滚轮缩放 | 拖拽平移 | Esc 清除")
+        self.usr = None; self.dst = None
+        self.canvas.usr = None; self.canvas.dst_marker = None
+        self.canvas.route = None; self.canvas.route_text = ""
+        self.si.clear(); self.rl.hide(); self.canvas.update()
+        self.slbl.setText("📍 点击地图/标记 选起点 | 🔍 搜索目的地 | 🖱 滚轮缩放 | 右键平移 | Esc 清除")
 
-# ── 启动 ──────────────────────────────────────────────────
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape: self.clear_all()
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    window = MainWindow()
-    window.show()
+    app = QApplication(sys.argv); app.setStyle("Fusion")
+    w = MainWindow(); w.show()
     sys.exit(app.exec())

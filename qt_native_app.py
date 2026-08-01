@@ -161,16 +161,15 @@ class MapCanvas(QWidget):
                 for i in range(len(pts)-1): p.drawLine(pts[i],pts[i+1])
 
         # POI
-        font=QFont("Microsoft YaHei",8)
         for pl in PLACES:
             px,py=self.ll2px(pl["lat"],pl["lng"])
             if -50<px<w+50 and -50<py<h+50:
-                p.setPen(Qt.NoPen)
                 c=QColor(34,197,94) if self.edit_mode else QColor(245,158,11)
-                p.setBrush(c); p.drawEllipse(QPoint(px,py),5,5)
-                if self.edit_mode:
-                    p.setFont(font); p.setPen(QColor(30,41,59))
-                    p.drawText(px+8,py+4,pl["name"][:8])
+                p.setPen(QPen(Qt.white,2)); p.setBrush(c)
+                p.drawEllipse(QPoint(px,py),6,6)
+                if self.edit_mode or self.zoom>=16:
+                    f=QFont("Microsoft YaHei",8); p.setFont(f)
+                    p.setPen(QColor(50,50,50)); p.drawText(px+9,py+4,pl["name"][:8])
 
         # 起点
         if self.usr:
@@ -235,6 +234,13 @@ class MapCanvas(QWidget):
             lat,lng=self.px2ll(e.position().x(),e.position().y())
             self._drag_poi["lat"]=round(lat,6); self._drag_poi["lng"]=round(lng,6)
             self.update(); return
+        # 限制经纬度范围
+        xs=[c[0] for c in BOUNDARY_COORDS]; ys=[c[1] for c in BOUNDARY_COORDS]
+        min_lng,max_lng=min(xs)-0.001,max(xs)+0.001
+        min_lat,max_lat=min(ys)-0.001,max(ys)+0.001
+        self.cx=max(min_lng,min(max_lng,self.cx))
+        self.cy=max(min_lat,min(max_lat,self.cy))
+
         if self.drag and self.last_pos is not None:
             pos=e.position(); dx,dy=pos.x()-self.last_pos.x(),pos.y()-self.last_pos.y()
             self.last_pos=pos; n=2.0**self.zoom

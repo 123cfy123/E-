@@ -37,6 +37,11 @@ python scripts/06_download_tiles.py
 # 3. 启动
 python app.py
 # → http://127.0.0.1:5000
+
+# 4. 开启公网访问（可选，需先配置 ngrok authtoken）
+ngrok config add-authtoken <你的token>
+ngrok http 5000
+# → 公网地址见 https://127.0.0.1:4040/api/tunnels
 ```
 
 ## 项目结构

@@ -26,7 +26,7 @@ cmd = [
     "--exclude-module", "PySide6",
     "--exclude-module", "PySide2",
     "--exclude-module", "tkinter",
-    "desktop_app.py"
+    "src/desktop_app.py"
 ]
 
 print(f"Command: {' '.join(cmd[:8])}...")

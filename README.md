@@ -34,9 +34,12 @@ conda activate ecnu-walk
 # 2. 下载离线瓦片（可选，加速地图加载）
 python scripts/06_download_tiles.py
 
-# 3. 启动
-python app.py
+# 3. 启动后端
+python src/app.py
 # → http://127.0.0.1:5000
+
+# 3b. 或启动轻量桌面版（无 GDAL，体积小）
+python src/light_desktop.py
 
 # 4. 开启公网访问（可选，需先配置 ngrok authtoken）
 ngrok config add-authtoken <你的token>
@@ -44,22 +47,39 @@ ngrok http 5000
 # → 公网地址见 https://127.0.0.1:4040/api/tunnels
 ```
 
+> 打包轻量桌面 exe：`pyinstaller src/light.spec`（产物在 `dist-lite/`）
+
 ## 项目结构
 
 ```
-├── app.py                    # Flask 后端 API
-├── static/index.html         # 前端单页应用
-├── environment.yml           # Conda 环境配置
+├── src/                      # 后端源码
+│   ├── app.py                # Flask 后端 API（osmnx 版）
+│   ├── light_backend.py      # 轻量后端（flask+networkx+shapely，无 GDAL/PyQt）
+│   ├── light_desktop.py      # 桌面版入口（pywebview）
+│   ├── desktop_app.py        # 桌面版入口（pywebview，osmnx 版）
+│   ├── qt_native_app.py      # Qt 原生版（PySide6）
+│   ├── ECNU-Walk.spec        # PyInstaller 打包配置（osmnx 版）
+│   └── light.spec            # PyInstaller 打包配置（轻量版）
+├── static/
+│   ├── index.html            # 前端单页应用
+│   └── tiles/                # 离线 OSM 瓦片
 ├── data/
-│   ├── ecnu_walk_merged.graphml    # 路由图 (1154节点 / 2602边)
-│   ├── ecnu_edges_merged.geojson   # 路段几何 (1301条)
-│   ├── campus_places.json          # 校园地点 (55个)
-│   └── campus_boundary.geojson     # 校园边界
-└── scripts/
-    ├── 01_download_network.py      # 下载 OSM 路网
-    ├── 02_merge_paths.py           # 合并 QGIS 手动路径
-    ├── 05_rebuild_graph.py         # 编辑路网后重建图
-    └── 06_download_tiles.py        # 下载离线瓦片
+│   ├── ecnu_walk_merged.graphml    # 路由图 (593节点 / 1334边)
+│   ├── ecnu_edges_merged.geojson   # 路段几何 (647条，仅校内)
+│   ├── campus_places.json          # 校园地点 (79个)
+│   ├── campus_boundary.geojson     # 校园边界
+│   └── campus_basemap_z18.tif      # 校园本地底图
+├── scripts/
+│   ├── 01_download_network.py      # 下载 OSM 路网
+│   ├── 02_merge_paths.py           # 合并 QGIS 手动路径
+│   ├── 05_rebuild_graph.py         # 编辑路网后重建图
+│   ├── 06_download_tiles.py        # 下载离线瓦片
+│   ├── 07_update_public_url.py     # 更新公网地址并推送
+│   ├── 08_trim_tiles.py            # 裁剪瓦片至校园范围
+│   ├── 09_build_exe.py             # 打包桌面 exe
+│   └── tmp/                        # 一次性临时脚本
+├── environment.yml           # Conda 环境配置
+└── requirements.txt          # pip 依赖
 ```
 
 ## 编辑自己的路网

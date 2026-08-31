@@ -7,76 +7,161 @@
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4/dist/maplibre-gl.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4/dist/maplibre-gl.css" />
 <style>
+:root {
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-light: #eff6ff;
+  --ink: #0f172a;
+  --slate: #475569;
+  --muted: #94a3b8;
+  --line: #e2e8f0;
+  --danger: #ef4444;
+  --amber: #f59e0b;
+  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 8px 28px rgba(15, 23, 42, 0.14);
+  --shadow-lg: 0 20px 60px rgba(15, 23, 42, 0.22);
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: #e8edf3;
+  -webkit-font-smoothing: antialiased;
+}
 #map { width: 100vw; height: 100vh; }
 
-/* 搜索栏 */
-#search-panel { position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-  z-index: 1000; width: 420px; max-width: 90vw; }
-#search-box { display: flex; background: #fff; border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15); overflow: hidden; }
-#search-input { flex: 1; border: none; padding: 14px 16px; font-size: 15px; outline: none; }
-#search-btn { border: none; background: #2563eb; color: #fff; padding: 0 20px;
-  font-size: 15px; cursor: pointer; white-space: nowrap; }
-#search-btn:hover { background: #1d4ed8; }
-#results-list { display: none; list-style: none; background: #fff; margin-top: 6px;
-  border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); overflow: hidden; }
-#results-list li { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #f0f0f0;
-  display: flex; justify-content: space-between; align-items: center; }
-#results-list li:hover { background: #eff6ff; }
-#results-list li:last-child { border-bottom: none; }
-.place-name { font-weight: 600; color: #1e293b; }
-.place-detail { font-size: 12px; color: #94a3b8; margin-top: 2px; }
-.place-go { color: #2563eb; font-size: 12px; font-weight: 600; }
-
-/* 按钮 */
-.side-btn { position: fixed; right: 12px; z-index: 1000;
-  width: 40px; height: 40px; background: #fff; border: none;
-  border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-  font-size: 18px; cursor: pointer; line-height: 40px; text-align: center; }
-.side-btn.active { background: #fef08a; box-shadow: 0 0 0 3px #eab308; }
-#locate-btn { top: 100px; }
-#pick-btn { top: 152px; }
-#edit-btn { top: 204px; }
-#add-btn { top: 256px; }
-#reset-btn { top: 308px; }
-
-/* 路线信息 */
-#route-info { display: none; position: fixed; bottom: 24px; left: 12px; z-index: 1000;
-  background: #fff; border-radius: 12px; padding: 16px 20px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15); min-width: 200px; }
-#route-info .dist { font-size: 24px; font-weight: 700; color: #2563eb; }
-#route-info .time { font-size: 14px; color: #64748b; margin-top: 4px; }
-#route-info .close { position: absolute; top: 8px; right: 12px;
-  background: none; border: none; font-size: 18px; cursor: pointer; color: #94a3b8; }
-
-/* 编辑弹窗 */
-#edit-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  z-index: 3000; background: rgba(0,0,0,0.4);
-  justify-content: center; align-items: center; }
-#edit-modal.show { display: flex; }
-#edit-modal .card { background: #fff; border-radius: 16px; padding: 24px;
-  width: 380px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-#edit-modal h3 { margin-bottom: 16px; }
-#edit-modal label { font-size: 13px; color: #64748b; display: block; margin: 8px 0 4px; }
-#edit-modal input, #edit-modal textarea { width: 100%; padding: 8px 12px;
-  border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; }
-#edit-modal input:focus, #edit-modal textarea:focus { border-color: #2563eb; }
-#edit-modal textarea { resize: vertical; min-height: 50px; }
-#edit-modal .btns { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
-#edit-modal .btns button { padding: 8px 20px; border-radius: 8px; border: none;
-  font-size: 14px; cursor: pointer; }
-#edit-modal .btn-save { background: #2563eb; color: #fff; }
-#edit-modal .btn-del { background: #ef4444; color: #fff; margin-right: auto; }
-#edit-modal .btn-cancel { background: #f1f5f9; color: #64748b; }
-
+/* 加载条 */
 #loading-bar { display: none; position: fixed; top: 0; left: 0; right: 0; height: 3px;
-  z-index: 4000; background: linear-gradient(90deg, #2563eb, #7c3aed, #2563eb);
-  background-size: 200% 100%; animation: ld 1.5s infinite; }
+  z-index: 5000; background: linear-gradient(90deg, #2563eb, #7c3aed, #06b6d4, #2563eb);
+  background-size: 200% 100%; animation: ld 1.4s linear infinite; }
 @keyframes ld { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-.maplibregl-ctrl-bottom-right { bottom: 80px; }
+/* 顶部品牌条 */
+#brand-badge { position: fixed; top: 14px; left: 16px; z-index: 1000;
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,0.92); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.6);
+  padding: 8px 16px 8px 10px; border-radius: 14px; box-shadow: var(--shadow-md); }
+#brand-badge .logo { width: 34px; height: 34px; border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 18px; font-weight: 700; }
+#brand-badge .name { font-size: 15px; font-weight: 700; color: var(--ink); letter-spacing: 0.5px; }
+#brand-badge .sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+/* 搜索栏 */
+#search-panel { position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 1200; width: 460px; max-width: calc(100vw - 140px); }
+#search-box { display: flex; align-items: center; background: rgba(255,255,255,0.96);
+  backdrop-filter: blur(10px); border-radius: 16px; overflow: hidden;
+  box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,0.7);
+  transition: box-shadow .2s, transform .2s; }
+#search-box:focus-within { box-shadow: 0 0 0 3px rgba(37,99,235,0.18), var(--shadow-md); }
+#search-box .search-ico { padding-left: 16px; color: var(--muted); font-size: 15px; flex-shrink: 0; }
+#search-input { flex: 1; border: none; padding: 15px 10px 15px 10px; font-size: 15px;
+  outline: none; background: transparent; color: var(--ink); }
+#search-input::placeholder { color: #a7b3c4; }
+#search-btn { border: none; background: var(--primary); color: #fff; padding: 0 24px;
+  font-size: 15px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  align-self: stretch; transition: background .15s; }
+#search-btn:hover { background: var(--primary-dark); }
+
+#results-list { display: none; list-style: none; background: rgba(255,255,255,0.98);
+  margin-top: 8px; border-radius: 16px; overflow: hidden;
+  box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,0.7); }
+#results-list li { padding: 13px 18px; cursor: pointer; display: flex;
+  justify-content: space-between; align-items: center;
+  border-bottom: 1px solid #f1f5f9; transition: background .12s; }
+#results-list li:hover { background: var(--primary-light); }
+#results-list li:last-child { border-bottom: none; }
+.place-name { font-weight: 600; color: var(--ink); font-size: 15px; }
+.place-detail { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.place-go { color: var(--primary); font-size: 12px; font-weight: 600;
+  background: var(--primary-light); padding: 6px 12px; border-radius: 20px;
+  transition: background .15s, color .15s; }
+#results-list li:hover .place-go { background: var(--primary); color: #fff; }
+
+/* 右侧按钮组 */
+#toolbar { position: fixed; top: 88px; right: 14px; z-index: 1000;
+  display: flex; flex-direction: column; gap: 10px; }
+.side-btn { width: 46px; height: 46px; border: 1px solid rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.94); backdrop-filter: blur(8px);
+  border-radius: 14px; box-shadow: var(--shadow-sm);
+  font-size: 19px; cursor: pointer; line-height: 46px; text-align: center;
+  color: #334155; transition: all .16s ease; position: relative; }
+.side-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); filter: brightness(0.96); }
+.side-btn:active { transform: translateY(0); }
+.side-btn::after { content: attr(data-tip); position: absolute; right: 58px; top: 50%;
+  transform: translateY(-50%) scale(0.9); background: var(--ink); color: #fff;
+  font-size: 12px; padding: 5px 10px; border-radius: 8px; white-space: nowrap;
+  opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; }
+.side-btn:hover::after { opacity: 1; transform: translateY(-50%) scale(1); }
+.side-btn.active { background: #fef08a; color: #854d0e; border-color: #eab308;
+  box-shadow: 0 0 0 3px rgba(234,179,8,0.25), var(--shadow-sm); }
+#toolbar .sep { height: 1px; background: rgba(148,163,184,0.25); margin: 2px 6px; }
+
+/* 路线信息卡片 */
+#route-info { display: none; position: fixed; bottom: 24px; left: 16px; z-index: 1200;
+  background: rgba(255,255,255,0.97); backdrop-filter: blur(10px);
+  border-radius: 18px; padding: 18px 22px; min-width: 210px;
+  box-shadow: var(--shadow-lg); border: 1px solid rgba(255,255,255,0.7);
+  animation: rise .25s ease; }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+#route-info .dist { font-size: 30px; font-weight: 800; color: var(--primary); letter-spacing: -0.5px; }
+#route-info .dist small { font-size: 14px; font-weight: 600; color: var(--primary); margin-left: 3px; }
+#route-info .time { font-size: 14px; color: var(--slate); margin-top: 5px; font-weight: 500; }
+#route-info .time b { color: var(--ink); }
+#route-info .close { position: absolute; top: 10px; right: 12px; background: #f1f5f9;
+  border: none; width: 24px; height: 24px; border-radius: 8px; font-size: 14px;
+  cursor: pointer; color: var(--muted); line-height: 24px; transition: background .15s, color .15s; }
+#route-info .close:hover { background: #e2e8f0; color: var(--ink); }
+#waypoints-list { margin-top: 10px; font-size: 13px; color: var(--slate); line-height: 1.6; }
+
+/* 编辑弹窗 */
+#edit-modal { display: none; position: fixed; inset: 0; z-index: 3000;
+  background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(3px);
+  justify-content: center; align-items: center; }
+#edit-modal.show { display: flex; animation: fade .2s ease; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+#edit-modal .card { background: #fff; border-radius: 20px; padding: 26px;
+  width: 400px; max-width: 92vw; box-shadow: var(--shadow-lg);
+  animation: pop .22s cubic-bezier(.2,.9,.3,1.2); }
+@keyframes pop { from { opacity: 0; transform: scale(0.92) translateY(8px); } to { opacity: 1; transform: none; } }
+#edit-modal .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+#edit-modal .card-head .ico { width: 34px; height: 34px; border-radius: 10px;
+  background: var(--primary-light); color: var(--primary); display: flex;
+  align-items: center; justify-content: center; font-size: 17px; }
+#edit-modal h3 { font-size: 17px; color: var(--ink); }
+#edit-modal label { font-size: 13px; color: var(--slate); display: block; margin: 14px 0 6px; font-weight: 500; }
+#edit-modal input, #edit-modal textarea { width: 100%; padding: 10px 13px;
+  border: 1.5px solid var(--line); border-radius: 11px; font-size: 14px; outline: none;
+  color: var(--ink); background: #f8fafc; transition: border-color .15s, background .15s, box-shadow .15s; }
+#edit-modal input:focus, #edit-modal textarea:focus { border-color: var(--primary);
+  background: #fff; box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+#edit-modal textarea { resize: vertical; min-height: 56px; }
+#edit-modal .btns { display: flex; gap: 10px; margin-top: 22px; justify-content: flex-end; }
+#edit-modal .btns button { padding: 10px 22px; border-radius: 11px; border: none;
+  font-size: 14px; font-weight: 600; cursor: pointer; transition: all .15s; }
+#edit-modal .btn-save { background: var(--primary); color: #fff; }
+#edit-modal .btn-save:hover { background: var(--primary-dark); box-shadow: var(--shadow-sm); }
+#edit-modal .btn-del { background: #fef2f2; color: var(--danger); margin-right: auto; }
+#edit-modal .btn-del:hover { background: #fee2e2; }
+#edit-modal .btn-cancel { background: #f1f5f9; color: var(--slate); }
+#edit-modal .btn-cancel:hover { background: #e2e8f0; }
+
+/* 地图控件下移，避开底部信息 */
+.maplibregl-ctrl-bottom-right { bottom: 40px; }
+.maplibregl-ctrl-group { box-shadow: var(--shadow-sm) !important; border-radius: 12px !important; overflow: hidden; }
+.maplibregl-ctrl-group button { width: 34px !important; height: 34px !important; }
+
+/* 响应式 */
+@media (max-width: 720px) {
+  #search-panel { width: calc(100vw - 24px); top: 12px; }
+  #brand-badge { display: none; }
+  #toolbar { top: 76px; right: 8px; }
+  .side-btn { width: 42px; height: 42px; line-height: 42px; }
+}
 </style>
 </head>
 <body>
@@ -84,30 +169,43 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-s
 <div id="loading-bar"></div>
 <div id="map"></div>
 
+<div id="brand-badge">
+  <div class="logo">走</div>
+  <div>
+    <div class="name">E刻校园</div>
+    <div class="sub">华师大闵行校区 · 智能步行导航</div>
+  </div>
+</div>
+
 <div id="search-panel">
   <div id="search-box">
+    <span class="search-ico">🔍</span>
     <input id="search-input" placeholder="搜一搜: 打印成绩单 / 打篮球 / 补办校园卡..." autocomplete="off" />
     <button id="search-btn" onclick="doSearch()">搜索</button>
   </div>
   <ul id="results-list"></ul>
 </div>
 
-<button class="side-btn" id="locate-btn" onclick="locateMe()" title="定位">📍</button>
-<button class="side-btn" id="pick-btn" onclick="manualPick()" title="手动选起点">🎯</button>
-<button class="side-btn" id="edit-btn" onclick="toggleEdit()" title="编辑地点">✏️</button>
-<button class="side-btn" id="add-btn" onclick="startAddPlace()" title="新增地点">➕</button>
-<button class="side-btn" id="reset-btn" onclick="resetNorth()" title="回正北">🧭</button>
+<div id="toolbar">
+  <button class="side-btn" id="locate-btn" data-tip="定位" onclick="locateMe()">📍</button>
+  <button class="side-btn" id="pick-btn" data-tip="手动选起点" onclick="manualPick()">🎯</button>
+  <div class="sep"></div>
+  <button class="side-btn" id="edit-btn" data-tip="编辑地点" onclick="toggleEdit()">✏️</button>
+  <button class="side-btn" id="add-btn" data-tip="新增地点" onclick="startAddPlace()">➕</button>
+  <div class="sep"></div>
+  <button class="side-btn" id="reset-btn" data-tip="回正北" onclick="resetNorth()">🧭</button>
+</div>
 
 <div id="route-info">
   <button class="close" onclick="clearRoute()">✕</button>
   <div class="dist" id="route-dist"></div>
   <div class="time" id="route-time"></div>
-  <div id="waypoints-list" style="margin-top:8px;font-size:13px;color:#475569;"></div>
+  <div id="waypoints-list"></div>
 </div>
 
 <div id="edit-modal">
   <div class="card">
-    <h3 id="modal-title">编辑地点</h3>
+    <div class="card-head"><div class="ico">📍</div><h3 id="modal-title">编辑地点</h3></div>
     <label>名称</label><input id="edit-name" />
     <label>关键词 (用逗号分隔)</label><input id="edit-keywords" placeholder="图书馆, 借书, 自习" />
     <label>详情</label><textarea id="edit-detail" placeholder="开放时间、楼层等"></textarea>
